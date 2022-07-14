@@ -49,6 +49,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "140206b78fb2bc3edbcfc9b5ccbd0b30699cfe8d348b8b31b330e47df5291a5a"
 
 [[package]]
+name = "fan-z"
+version = "0.1.0"
+dependencies = [
+ "sdl2",
+ "zsp-core",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -89,14 +97,6 @@ checksum = "efbc0f03f9a775e9f6aed295c6a1ba2253c5757a9e03d55c6caa46a681abcddd"
 dependencies = [
  "cfg-if",
  "winapi",
-]
-
-[[package]]
-name = "peta-z"
-version = "0.1.0"
-dependencies = [
- "sdl2",
- "zsp-core",
 ]
 
 [[package]]

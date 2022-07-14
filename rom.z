@@ -1,6 +1,4 @@
 a = 0
 draw {
-    a = a + 1
-    put a
+    gset
 }
-put "A"
