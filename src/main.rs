@@ -5,15 +5,21 @@ use sdl2::pixels::Color;
 use std::collections::HashMap;
 use std::time::Duration;
 use std::{cell::RefCell, rc::Rc};
+use strum::IntoEnumIterator; // 0.17.1
+use strum_macros::EnumIter;
 use zsp_core::{
     self,
     runtime::{self, FunctionType, RFunction, ScopeType},
     *,
 };
-const WIDTH: usize = 160 / 2;
-const HEIGHT: usize = 120 / 2;
+
+const SCREENWIDTH: usize = 160 * 8;
+const SCREENHEIGHT: usize = 120 * 8;
+const GAMEWIDTH: usize = 160;
+const GAMEHEIGHT: usize = 120;
 
 static mut STATE: *mut GameState = std::ptr::null_mut();
+
 fn main() {
     let contents = std::fs::read_to_string("rom.z")
         .expect("could not read file")
@@ -25,7 +31,13 @@ fn main() {
 
     let libraryfunctions = consolebuiltins::functions();
 
-    let root = parser::parse(tokens, &contents, &libraryfunctions);
+    let root = match parser::parse(tokens, &contents, &libraryfunctions) {
+        Err(e) => {
+            println!("{}", e.fmt(&contents));
+            panic!()
+        }
+        Ok(s) => s,
+    };
     println!("{:?}", root);
 
     let mut functions = builtins::functions();
@@ -49,6 +61,7 @@ fn main() {
     ));
     let mut state = GameState {
         screen: Screen::new(),
+        buttons: HashMap::new(),
     };
     unsafe {
         STATE = &mut state;
@@ -59,7 +72,7 @@ fn main() {
     let video_subsystem = sdl_context.video().unwrap();
 
     let window = video_subsystem
-        .window("rust-sdl2 demo", WIDTH as u32, HEIGHT as u32)
+        .window("fan-z", SCREENWIDTH as u32, SCREENHEIGHT as u32)
         .position_centered()
         .build()
         .unwrap();
@@ -69,17 +82,32 @@ fn main() {
     canvas.set_draw_color(Color::RGB(0, 255, 255));
     canvas.clear();
     canvas.present();
+    let mut i: u8 = 0;
     let mut event_pump = sdl_context.event_pump().unwrap();
     'running: loop {
-        canvas.set_draw_color(Color::RGB(0, 0, 0));
+        i = (i + 1) % 255;
+        canvas.set_draw_color(Color::RGB(i, 64, 255 - i));
         canvas.clear();
         for event in event_pump.poll_iter() {
             match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => break 'running,
+                Event::Quit { .. } => break 'running,
+                Event::KeyDown { keycode, .. } => {
+                    if let Some(k) = keycode {
+                        state.buttons.insert(k.name(), true);
+                    }
+                }
+                Event::KeyUp { keycode, .. } => {
+                    if let Some(k) = keycode {
+                        state.buttons.insert(k.name(), false);
+                    }
+                }
+                Event::MouseMotion { x, y, .. } => {}
+                Event::MouseButtonDown { mouse_btn, .. } => {
+                    state.buttons.insert(format!("Mouse{:?}", mouse_btn), true);
+                }
+                Event::MouseButtonUp { mouse_btn, .. } => {
+                    state.buttons.insert(format!("Mouse{:?}", mouse_btn), false);
+                }
                 _ => {}
             }
         }
@@ -93,21 +121,42 @@ fn main() {
             &contents,
         );
         // dbg!(&state.screen.data);
+        // for (i, c) in state.screen.data.iter().enumerate() {
+        //     canvas.set_draw_color(*c);
+        //     canvas
+        //         .draw_point(sdl2::rect::Point::new(
+        //             (i % state.screen.width) as i32,
+        //             (i / state.screen.height) as i32,
+        //         ))
+        //         .unwrap();
+        // }
+
         for x in 0..state.screen.width {
             for y in 0..state.screen.height {
                 canvas.set_draw_color(state.screen.get(x, y));
                 canvas
-                    .draw_point(sdl2::rect::Point::new(x as i32, y as i32))
+                    .fill_rect(sdl2::rect::Rect::new(x as i32 * 8, y as i32 * 8, 8, 8))
                     .unwrap();
             }
         }
         canvas.present();
-        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 * 2));
+        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
     }
 }
 #[derive(Debug, Clone)]
 struct GameState {
     screen: Screen,
+    buttons: HashMap<String, bool>,
+}
+
+impl GameState {
+    fn getbtn(&self, s: String) -> bool {
+        if let Some(b) = self.buttons.get(&s) {
+            *b
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -119,21 +168,24 @@ struct Screen {
 impl Screen {
     fn new() -> Screen {
         Screen {
-            width: WIDTH,
-            height: HEIGHT,
-            data: vec![Color::RGB(0, 0, 0); WIDTH * HEIGHT],
+            width: GAMEWIDTH,
+            height: GAMEHEIGHT,
+            data: vec![Color::RGB(0, 0, 0); GAMEWIDTH * GAMEHEIGHT],
         }
     }
     fn set(&mut self, x: usize, y: usize, c: Color) {
         if x > self.width || y > self.height {
             panic!()
         }
-        self.data[x + y * self.height] = c;
+        self.data[x + (y * self.width)] = c;
     }
     fn get(&mut self, x: usize, y: usize) -> Color {
         if x > self.width || y > self.height {
             panic!()
         }
-        self.data[x + y * self.height]
+        self.data[x + (y * self.width)]
+    }
+    fn clear(&mut self, c: Color) {
+        self.data = vec![c; GAMEWIDTH * GAMEHEIGHT];
     }
 }

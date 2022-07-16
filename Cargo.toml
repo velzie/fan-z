@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 zsp-core = {path = "../zsp/core"}
 sdl2 = "*"
+strum = "0.24"
+strum_macros = "0.24"
