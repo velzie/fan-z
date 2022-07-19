@@ -1,8 +1,11 @@
+use crate::spriteswindow::Sprite;
 // use c
 use crate::zvm::{self, ZEvent, ZVMState, STATE_PTR, ZVM};
 use crate::FanzApp;
+use array2d::Array2D;
 use egui::{
-    pos2, Align2, Color32, Id, Key, LayerId, Painter, Rect, RichText, Sense, Stroke, Vec2, Widget,
+    pos2, Align2, Color32, Id, Key, LayerId, Painter, Pos2, Rect, RichText, Sense, Stroke, Vec2,
+    Widget,
 };
 pub struct GameWindow<'a> {
     pub enabled: bool,
@@ -18,44 +21,64 @@ impl<'a> Default for GameWindow<'a> {
 }
 impl<'a> GameWindow<'a> {
     pub fn ui(&mut self, app: &mut FanzApp<'a>, ui: &mut egui::Ui) {
-        let (_resp, painter) =
-            ui.allocate_painter(Vec2::new(320.0, 240.0), Sense::click_and_drag());
+        let scalefactor =
+            f32::floor(ui.available_width() / 160.0).min(f32::floor(ui.available_width() / 120.0));
+
+        let (_resp, painter) = ui.allocate_painter(
+            Vec2::new(160.0 * scalefactor, 120.0 * scalefactor),
+            Sense::click_and_drag(),
+        );
 
         match &mut self.vm {
             Some(vm) => {
                 let mut state = unsafe { &mut *STATE_PTR };
                 match vm.draw() {
                     Err(e) => {
-                        let o = zvm::errfmt(e, &app.code);
+                        let o = zvm::errfmt(e, &app.cart.code);
                         app.output
                             .push(RichText::new(o.to_string()).color(Color32::RED));
                     }
                     _ => (),
                 }
 
-                let startx = painter.clip_rect().min.x;
-                let starty = painter.clip_rect().min.y;
+                let start = painter.clip_rect().min;
                 painter.rect_filled(painter.clip_rect(), 0.0, Color32::BLACK);
                 for i in &state.buffer {
                     match i {
                         ZEvent::Put(s) => app.output.push(RichText::new(s)),
-                        ZEvent::GSet { x, y, color } => painter.rect_filled(
-                            Rect::from_min_size(
-                                egui::pos2(startx + x, starty + y),
-                                Vec2::new(2.0, 2.0),
-                            ),
-                            0.0,
-                            *color,
-                        ),
+                        ZEvent::GSet { x, y, color } => {
+                            drawpixel(&painter, scalefactor, start, *x, *y, *color)
+                        }
                         ZEvent::Rect { x, y, h, w, color } => painter.rect_filled(
                             Rect::from_min_size(
-                                pos2(startx + x, starty + y),
-                                Vec2 { x: *w, y: *h },
+                                pos2(start.x + x * scalefactor, start.y + y * scalefactor),
+                                Vec2 {
+                                    x: *w * scalefactor,
+                                    y: *h * scalefactor,
+                                },
                             ),
                             0.0,
                             *color,
                         ),
-                        _ => panic!(),
+                        ZEvent::Sprite {
+                            x: sx,
+                            y: sy,
+                            sprite,
+                        } => {
+                            let spritedata = &app.cart.sprites[*sprite].data;
+                            for x in 0..8 {
+                                for y in 0..8 {
+                                    drawpixel(
+                                        &painter,
+                                        scalefactor,
+                                        start,
+                                        *sx + x as f32,
+                                        *sy + y as f32,
+                                        spritedata.get(x, y).unwrap().clone(),
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 state.buffer = vec![];
@@ -70,4 +93,15 @@ impl<'a> GameWindow<'a> {
             None => (),
         }
     }
+}
+
+fn drawpixel(painter: &Painter, scalefactor: f32, start: Pos2, x: f32, y: f32, color: Color32) {
+    painter.rect_filled(
+        Rect::from_min_size(
+            egui::pos2(start.x + x * scalefactor, start.y + y * scalefactor),
+            Vec2::new(scalefactor, scalefactor),
+        ),
+        0.0,
+        color,
+    )
 }

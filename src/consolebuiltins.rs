@@ -15,7 +15,7 @@ pub fn functions() -> HashMap<String, RFunction> {
         func!("color", color, 3),
         func!("gset", gset, 3),
         func!("rect", rect, 5),
-        // func!("clear", clear, 1),
+        func!("sprite", sprite, 3),
     ])
 }
 #[derive(Debug, Clone)]
@@ -57,9 +57,20 @@ fn gset<'a>(mut inp: Vec<Value<'a>>) -> Result<Value<'_>, Exception> {
         (*STATE_PTR).buffer.push(ZEvent::GSet {
             color: downcast_dyn::<ZColor>(
                 &mut inp[2].as_ref().clone().borrow_mut().as_dyn_object(),
-            ).tocolor(),
+            )
+            .tocolor(),
             x: inp[0].to_number(),
             y: inp[1].to_number(),
+        });
+    }
+    Ok(Value::Null)
+}
+fn sprite<'a>(mut inp: Vec<Value<'a>>) -> Result<Value<'_>, Exception> {
+    unsafe {
+        (*STATE_PTR).buffer.push(ZEvent::Sprite {
+            sprite: inp[0].to_number() as usize,
+            x: inp[1].to_number(),
+            y: inp[2].to_number(),
         });
     }
     Ok(Value::Null)
@@ -69,7 +80,8 @@ fn rect<'a>(mut inp: Vec<Value<'a>>) -> Result<Value<'_>, Exception> {
         (*STATE_PTR).buffer.push(ZEvent::Rect {
             color: downcast_dyn::<ZColor>(
                 &mut inp[4].as_ref().clone().borrow_mut().as_dyn_object(),
-            ).tocolor(),
+            )
+            .tocolor(),
             x: inp[0].to_number(),
             y: inp[1].to_number(),
             w: inp[2].to_number(),

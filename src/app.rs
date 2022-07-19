@@ -3,11 +3,12 @@ use crate::{
     codewindow::CodeWindow,
     gamewindow::GameWindow,
     mapwindow::MapWindow,
-    spriteswindow::SpritesWindow,
+    spriteswindow::{Sprite, SpritesWindow},
     zvm::{self, ZVMState, STATE_PTR, ZVM},
 };
 use egui::{
-    pos2, Align2, Color32, Id, Key, LayerId, Painter, Rect, RichText, Sense, Stroke, Vec2, Widget,
+    pos2, vec2, Align2, Color32, Id, Key, LayerId, Layout, Painter, Rect, RichText, Sense, Stroke,
+    Vec2, Widget,
 };
 use std::{cell::RefCell, rc::Rc};
 
@@ -15,29 +16,39 @@ use std::{cell::RefCell, rc::Rc};
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct FanzApp<'a> {
-    pub code: String,
+    pub cart: Cart,
 
     pub codewindow: Rc<RefCell<CodeWindow>>,
 
     pub mapwindow: Rc<RefCell<MapWindow>>,
     pub spriteswindow: Rc<RefCell<SpritesWindow>>,
 
+    pub selectedsprite: usize,
     #[serde(skip)]
     pub gamewindow: Rc<RefCell<GameWindow<'a>>>,
 
     #[serde(skip)]
     pub output: Vec<RichText>,
 }
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct Cart {
+    pub code: String,
+    pub sprites: Vec<Sprite>,
+}
 
 impl<'a> Default for FanzApp<'a> {
     fn default() -> Self {
         Self {
+            selectedsprite: 0,
             output: vec![RichText::new("fan-z launched").color(Color32::GREEN)],
-            code: "".into(),
             gamewindow: Rc::new(RefCell::new(GameWindow::default())),
             codewindow: Rc::new(RefCell::new(CodeWindow::default())),
             mapwindow: Rc::new(RefCell::new(MapWindow::default())),
             spriteswindow: Rc::new(RefCell::new(SpritesWindow::default())),
+            cart: Cart {
+                code: "".into(),
+                sprites: vec![],
+            },
         }
     }
 }
@@ -97,10 +108,10 @@ impl<'a> eframe::App for FanzApp<'a> {
                             }))
                         };
                         if ui.button("Play").clicked() {
-                            *vm = match ZVM::start(&self.code) {
+                            *vm = match ZVM::start(&self.cart.code) {
                                 Ok(vm) => Some(vm),
                                 Err(e) => {
-                                    let o = zvm::errfmt(e, &self.code);
+                                    let o = zvm::errfmt(e, &self.cart.code);
                                     self.output
                                         .push(RichText::new(o.to_string()).color(Color32::RED));
                                     None
@@ -132,11 +143,50 @@ impl<'a> eframe::App for FanzApp<'a> {
                     });
             });
 
-        egui::SidePanel::left("tool_panel").show(ctx, |ui| {
-            ui.heading("Tool Panel");
+        if self.mapwindow.clone().borrow_mut().enabled
+            || self.spriteswindow.clone().borrow_mut().enabled
+        {
+            egui::SidePanel::left("sprite_selector").show(ctx, |ui| {
+                // ui.set_max_width(ui.available_width());
+                ui.heading("Sprite Selector");
+                ui.horizontal_wrapped(|ui| {
+                    for (i, sprite) in self.cart.sprites.iter().enumerate() {
+                        let (id, rect) = ui.allocate_space(Vec2::new(32.0, 32.0));
+                        let response = ui.interact(rect, id, egui::Sense::click());
 
-            ui.small_button("Select");
-        });
+                        ui.painter().rect(
+                            rect,
+                            0f32,
+                            Color32::BLACK,
+                            if i == self.selectedsprite {
+                                Stroke::new(2.0, Color32::WHITE)
+                            } else {
+                                Stroke::none()
+                            },
+                        );
+                        for x in 0..8 {
+                            for y in 0..8 {
+                                let fillrect = Rect::from_min_size(
+                                    rect.min + vec2(x as f32 * 4.0, y as f32 * 4.0),
+                                    vec2(4.0, 4.0),
+                                );
+                                ui.painter().rect_filled(
+                                    fillrect,
+                                    0f32,
+                                    sprite.data.get(x, y).unwrap().clone(),
+                                )
+                            }
+                        }
+                        if response.clicked() {
+                            self.selectedsprite = i;
+                        }
+                    }
+                });
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    ui.label(format!("Selected Sprite: {}", self.selectedsprite))
+                });
+            });
+        }
         egui::SidePanel::right("view_panel")
             .resizable(false)
             .show(ctx, |ui| {
@@ -166,7 +216,10 @@ impl<'a> eframe::App for FanzApp<'a> {
         let mut win = tmp.borrow_mut();
         if win.enabled {
             egui::Window::new("Game")
-                .fixed_size(Vec2::new(320.0, 240.0))
+                .resize(|r| {
+                    r.resizable(false);
+                    r.min_size(vec2(160.0, 120.0))
+                })
                 .show(ctx, |ui| {
                     win.ui(self, ui);
                 });
@@ -204,7 +257,7 @@ impl<'a> eframe::App for FanzApp<'a> {
     }
 }
 
-fn toolbtn_ui(ui: &mut egui::Ui, text: &str, on: &mut bool) -> egui::Response {
+pub fn toolbtn_ui(ui: &mut egui::Ui, text: &str, on: &mut bool) -> egui::Response {
     // if ui.is_rect_visible(rect)
     let size = ui.available_size().x;
     let (id, rect) = ui.allocate_space(Vec2::new(size / 2.0, size / 2.0));

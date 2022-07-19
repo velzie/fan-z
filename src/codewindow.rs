@@ -17,7 +17,7 @@ impl CodeWindow {
     pub fn ui<'a>(&mut self, app: &mut FanzApp<'a>, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.add(
-                egui::TextEdit::multiline(&mut app.code)
+                egui::TextEdit::multiline(&mut app.cart.code)
                     .font(egui::TextStyle::Monospace) // for cursor height
                     .code_editor()
                     .desired_rows(40)

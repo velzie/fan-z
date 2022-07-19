@@ -25,6 +25,11 @@ pub enum ZEvent {
         w: f32,
         color: Color32,
     },
+    Sprite {
+        x: f32,
+        y: f32,
+        sprite: usize,
+    },
     Put(String),
 }
 pub struct ZVM<'a> {
