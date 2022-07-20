@@ -176,16 +176,16 @@ impl MapWindow {
                 }
             }
         }
-        self.zoom = self.zoom.min(0.5);
-        dbg!(map.num_rows() as f32 * tilesize);
-        dbg!(self.offset);
-        self.offset = self.offset.clamp(
-            pos2(
-                map.num_rows() as f32 * tilesize * -tilesize,
-                map.num_columns() as f32 * tilesize * -tilesize,
-            ),
-            pos2(0.0, 0.0),
-        );
+        // self.zoom = self.zoom.min(0.5);
+        // dbg!(map.num_rows() as f32 * tilesize);
+        // dbg!(self.offset);
+        // self.offset = self.offset.clamp(
+        //     pos2(
+        //         map.num_rows() as f32 * tilesize * -tilesize,
+        //         map.num_columns() as f32 * tilesize * -tilesize,
+        //     ),
+        //     pos2(0.0, 0.0),
+        // );
     }
 }
 fn drawsprite() {}
