@@ -6,6 +6,7 @@ use crate::{
     spriteswindow::{Sprite, SpritesWindow},
     zvm::{self, ZVMState, STATE_PTR, ZVM},
 };
+use array2d::Array2D;
 use egui::{
     pos2, vec2, Align2, Color32, Id, Key, LayerId, Layout, Painter, Rect, RichText, Sense, Stroke,
     Vec2, Widget,
@@ -34,6 +35,7 @@ pub struct FanzApp<'a> {
 pub struct Cart {
     pub code: String,
     pub sprites: Vec<Sprite>,
+    pub map: Array2D<Option<usize>>,
 }
 
 impl<'a> Default for FanzApp<'a> {
@@ -46,6 +48,7 @@ impl<'a> Default for FanzApp<'a> {
             mapwindow: Rc::new(RefCell::new(MapWindow::default())),
             spriteswindow: Rc::new(RefCell::new(SpritesWindow::default())),
             cart: Cart {
+                map: Array2D::filled_with(None, 8, 8),
                 code: "".into(),
                 sprites: vec![],
             },
@@ -139,6 +142,7 @@ impl<'a> eframe::App for FanzApp<'a> {
                         for t in &self.output {
                             ui.code(t.clone().code());
                         }
+
                         ui.add_space(ui.available_height());
                     });
             });

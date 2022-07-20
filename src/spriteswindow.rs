@@ -74,6 +74,27 @@ impl SpritesWindow {
                                 start + vec2(x as f32 * 32.0, y as f32 * 32.0),
                                 vec2(32.0, 32.0),
                             );
+                            for x2 in 0..4 {
+                                for y2 in 0..4 {
+                                    painter.rect_filled(
+                                        Rect::from_min_size(
+                                            start
+                                                + vec2(
+                                                    x as f32 * 32.0 + x2 as f32 * 8.0,
+                                                    y as f32 * 32.0 + y2 as f32 * 8.0,
+                                                ),
+                                            vec2(8.0, 8.0),
+                                        ),
+                                        0f32,
+                                        if (x2 + y2) % 2 != 0 {
+                                            Color32::LIGHT_GRAY
+                                        } else {
+                                            Color32::GRAY
+                                        },
+                                    );
+                                }
+                            }
+
                             painter.rect(
                                 squarerect,
                                 0f32,

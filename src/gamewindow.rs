@@ -45,7 +45,12 @@ impl<'a> GameWindow<'a> {
                 painter.rect_filled(painter.clip_rect(), 0.0, Color32::BLACK);
                 for i in &state.buffer {
                     match i {
-                        ZEvent::Put(s) => app.output.push(RichText::new(s)),
+                        ZEvent::Put(s) => {
+                            if app.output.len() > 100 {
+                                app.output.clear();
+                            }
+                            app.output.push(RichText::new(s))
+                        }
                         ZEvent::GSet { x, y, color } => {
                             drawpixel(&painter, scalefactor, start, *x, *y, *color)
                         }
