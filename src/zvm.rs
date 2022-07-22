@@ -1,6 +1,7 @@
 use crate::consolebuiltins::{self, ZColor};
 use egui::{Color32, Pos2, Rect};
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::{cell::RefCell, rc::Rc};
 use zsp_core::{
     builtins,
@@ -12,6 +13,7 @@ use zsp_core::{
 // raw pointers
 pub static mut STATE_PTR: *mut ZVMState = std::ptr::null_mut();
 
+#[derive(Debug)]
 pub enum ZEvent {
     GSet {
         x: f32,
@@ -37,21 +39,19 @@ pub struct ZVM<'a> {
     pub functions: HashMap<String, RFunction>,
     pub root_scope: Rc<RefCell<Scope<'a>>>,
 }
+#[derive(Debug)]
 pub struct ZVMState {
     pub buffer: Vec<ZEvent>,
     pub keys: Vec<String>,
 }
 
 impl<'a> ZVM<'a> {
-    pub fn start(contents: &String) -> Result<ZVM<'a>, Exception> {
+    pub fn start(contents: String) -> Result<ZVM<'a>, Exception> {
         match std::panic::catch_unwind(|| -> Result<ZVM<'a>, Exception> {
             let tokens = lexer::lex(contents.clone());
-
             let libraryfunctions = consolebuiltins::functions();
 
             let root = parser::parse(tokens, &contents, &libraryfunctions)?;
-            println!("{:?}", root);
-
             let mut functions = builtins::functions();
 
             for (k, v) in libraryfunctions {
@@ -72,11 +72,10 @@ impl<'a> ZVM<'a> {
                 root.root.to_scope(ScopeType::Function, HashMap::new()),
             ));
             runtime::run_root(scope.clone(), &functions, &contents)?;
-
             Ok(ZVM {
                 functions,
                 root_scope: scope,
-                contents: contents.clone(),
+                contents: contents,
             })
         }) {
             Ok(o) => o,
@@ -89,16 +88,20 @@ impl<'a> ZVM<'a> {
     }
 
     pub fn draw(&mut self) -> Result<(), Exception> {
-        self.root_scope.borrow_mut().call_function(
-            self.functions.get("draw").unwrap(),
-            vec![],
-            &self.functions,
-            &self.contents,
-        )?;
+        if let Some(drawfunc) = self.functions.get("draw") {
+            self.root_scope.borrow_mut().call_function(
+                drawfunc,
+                vec![],
+                &self.functions,
+                &self.contents,
+            )?;
+        }
         Ok(())
     }
+    pub fn fmt(&self, exception: Exception) -> String {
+        errfmt(exception, &self.contents)
+    }
 }
-
 pub fn errfmt(exception: Exception, input: &String) -> String {
     let mut i = 0;
     let mut lines = 0;

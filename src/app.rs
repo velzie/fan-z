@@ -2,55 +2,88 @@
 use crate::{
     codewindow::CodeWindow,
     gamewindow::GameWindow,
+    leftpanel::{ObjectSelector, SpritesSelector},
     mapwindow::MapWindow,
-    spriteswindow::{Sprite, SpritesWindow},
-    zvm::{self, ZVMState, STATE_PTR, ZVM},
+    propertieswindow::PropertiesWindow,
+    spriteswindow::{sized_toolbtn_ui, Sprite, SpritesWindow},
+    tab::Tab,
+    zvm::{self, ZEvent, ZVMState, STATE_PTR, ZVM},
 };
 use array2d::Array2D;
 use egui::{
-    pos2, vec2, Align2, Color32, Id, Key, LayerId, Layout, Painter, Rect, RichText, Sense, Stroke,
-    Vec2, Widget,
+    pos2, vec2, Align2, Color32, Id, Key, LayerId, Layout, Painter, Pos2, Rect, RichText, Sense,
+    Stroke, Vec2, Widget,
 };
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, fmt::Debug, mem, rc::Rc, sync::Mutex};
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
-#[serde(default)] // if we add new fields, give them default values when deserializing old state
+// #[serde(default)] // if we add new fields, give them default values when deserializing old state
+// #[serde(skip)]
 pub struct FanzApp<'a> {
     pub cart: Cart,
 
+    #[serde(skip)]
     pub codewindow: Rc<RefCell<CodeWindow>>,
-
+    #[serde(skip)]
     pub mapwindow: Rc<RefCell<MapWindow>>,
+    #[serde(skip)]
     pub spriteswindow: Rc<RefCell<SpritesWindow>>,
 
+    #[serde(skip)]
+    pub propertieswindow: Rc<RefCell<PropertiesWindow>>,
+    #[serde(skip)]
     pub selectedsprite: usize,
     #[serde(skip)]
-    pub gamewindow: Rc<RefCell<GameWindow<'a>>>,
+    pub selectedobject: usize,
 
+    #[serde(skip)]
+    pub gamewindow: Rc<RefCell<GameWindow<'a>>>,
+    #[serde(skip)]
+    pub leftpanelselected: usize,
+    #[serde(skip)]
+    pub leftpanel: Rc<RefCell<Vec<Box<dyn Tab<'a>>>>>,
     #[serde(skip)]
     pub output: Vec<RichText>,
 }
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct Cart {
-    pub code: String,
     pub sprites: Vec<Sprite>,
     pub map: Array2D<Option<usize>>,
+    pub objects: Vec<EditorObject>,
+}
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct EditorObject {
+    pub pos: Pos2,
+    pub name: String,
+    pub script: String,
 }
 
 impl<'a> Default for FanzApp<'a> {
     fn default() -> Self {
+        dbg!(vec![
+            Box::new(SpritesSelector),
+            // Box::new(ObjectSelector),
+        ]
+        .len());
         Self {
             selectedsprite: 0,
             output: vec![RichText::new("fan-z launched").color(Color32::GREEN)],
             gamewindow: Rc::new(RefCell::new(GameWindow::default())),
             codewindow: Rc::new(RefCell::new(CodeWindow::default())),
             mapwindow: Rc::new(RefCell::new(MapWindow::default())),
+            propertieswindow: None,
             spriteswindow: Rc::new(RefCell::new(SpritesWindow::default())),
+            leftpanel: Rc::new(RefCell::new(vec![
+                Box::new(SpritesSelector),
+                Box::new(ObjectSelector),
+            ])),
+            leftpanelselected: 0,
+            selectedobject: 0,
             cart: Cart {
                 map: Array2D::filled_with(None, 8, 8),
-                code: "".into(),
                 sprites: vec![],
+                objects: vec![],
             },
         }
     }
@@ -91,32 +124,42 @@ impl<'a> eframe::App for FanzApp<'a> {
                         frame.quit();
                     }
                 });
+                ui.menu_button("View", |ui| {
+                    if ui.button("Sprite Selector").clicked() {
+                        self.leftpanel.borrow_mut().push(Box::new(SpritesSelector))
+                    }
+                    if ui.button("Object Selector").clicked() {
+                        self.leftpanel.borrow_mut().push(Box::new(ObjectSelector))
+                    }
+                });
                 let tmp = &mut self.gamewindow.clone();
                 let mut win = tmp.borrow_mut();
-                let vm = &mut win.vm;
-                match vm {
+                let game = &mut win.game;
+                match game {
                     Some(_) => {
                         if ui.button("Stop").clicked() {
-                            *vm = None;
-                            unsafe {
-                                drop(STATE_PTR);
-                            }
+                            *game = None;
                         }
                     }
                     None => {
-                        unsafe {
-                            STATE_PTR = Box::leak(Box::new(ZVMState {
-                                buffer: vec![],
-                                keys: vec![],
-                            }))
-                        };
                         if ui.button("Play").clicked() {
-                            *vm = match ZVM::start(&self.cart.code) {
+                            let state = unsafe {
+                                if STATE_PTR.is_null() {
+                                    STATE_PTR = Box::leak(Box::new(ZVMState {
+                                        buffer: vec![],
+                                        keys: vec![],
+                                    }));
+                                    // cry about it
+                                }
+                                &mut *STATE_PTR
+                            };
+                            state.buffer.clear();
+                            state.keys.clear();
+                            *game = match GameWindow::startgame(&mut self.cart) {
                                 Ok(vm) => Some(vm),
                                 Err(e) => {
-                                    let o = zvm::errfmt(e, &self.cart.code);
                                     self.output
-                                        .push(RichText::new(o.to_string()).color(Color32::RED));
+                                        .push(RichText::new(e.to_string()).color(Color32::RED));
                                     None
                                 }
                             };
@@ -147,50 +190,33 @@ impl<'a> eframe::App for FanzApp<'a> {
                     });
             });
 
-        if self.mapwindow.clone().borrow_mut().enabled
-            || self.spriteswindow.clone().borrow_mut().enabled
-        {
-            egui::SidePanel::left("sprite_selector").show(ctx, |ui| {
-                // ui.set_max_width(ui.available_width());
-                ui.heading("Sprite Selector");
-                ui.horizontal_wrapped(|ui| {
-                    for (i, sprite) in self.cart.sprites.iter().enumerate() {
-                        let (id, rect) = ui.allocate_space(Vec2::new(32.0, 32.0));
-                        let response = ui.interact(rect, id, egui::Sense::click());
-
-                        ui.painter().rect(
-                            rect,
-                            0f32,
-                            Color32::BLACK,
-                            if i == self.selectedsprite {
-                                Stroke::new(2.0, Color32::WHITE)
-                            } else {
-                                Stroke::none()
-                            },
-                        );
-                        for x in 0..8 {
-                            for y in 0..8 {
-                                let fillrect = Rect::from_min_size(
-                                    rect.min + vec2(x as f32 * 4.0, y as f32 * 4.0),
-                                    vec2(4.0, 4.0),
-                                );
-                                ui.painter().rect_filled(
-                                    fillrect,
-                                    0f32,
-                                    sprite.data.get(x, y).unwrap().clone(),
-                                )
-                            }
-                        }
-                        if response.clicked() {
-                            self.selectedsprite = i;
-                        }
+        // dbg!(self.leftpanel.borrow_mut().len());
+        egui::SidePanel::left("left_panel").show(ctx, |ui| {
+            let tmp = self.leftpanel.clone();
+            let mut tabs = tmp.borrow_mut();
+            ui.horizontal(|ui| {
+                for (i, tab) in tabs.iter().enumerate() {
+                    if ui.button(tab.name()).clicked() {
+                        self.leftpanelselected = i;
+                    }
+                }
+            });
+            ui.separator();
+            if let Some(tab) = tabs.get_mut(self.leftpanelselected) {
+                let mut remove = false;
+                ui.horizontal(|ui| {
+                    ui.heading(tab.name());
+                    if ui.button("x").clicked() {
+                        remove = true;
                     }
                 });
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.label(format!("Selected Sprite: {}", self.selectedsprite))
-                });
-            });
-        }
+                tab.ui(self, ui);
+                if remove {
+                    tabs.remove(self.leftpanelselected);
+                }
+            }
+        });
+
         egui::SidePanel::right("view_panel")
             .resizable(false)
             .show(ctx, |ui| {
@@ -257,6 +283,28 @@ impl<'a> eframe::App for FanzApp<'a> {
                 .show(ctx, |ui| {
                     win.ui(self, ui);
                 });
+        }
+    }
+}
+pub fn draw_sprite(painter: &Painter, rect: Rect, spr: &Sprite) {
+    let start = rect.min;
+    let size = rect.size();
+    let spritesize = vec2(spr.data.num_rows() as f32, spr.data.num_columns() as f32);
+
+    let scale_factor = (size.x / spritesize.x).min(size.y / spritesize.y);
+    let offset = vec2(0.0, 0.0);
+    // vec2(
+    //     (size.x / spritesize.x) - scale_factor,
+    //     (size.y / spritesize.y) - scale_factor,
+    // ) * scale_factor
+    //     / 2.0;
+    for x in 0..spr.data.num_rows() {
+        for y in 0..spr.data.num_columns() {
+            let fillrect = Rect::from_min_size(
+                start + offset + vec2(x as f32 * scale_factor, y as f32 * scale_factor),
+                vec2(scale_factor, scale_factor),
+            );
+            painter.rect_filled(fillrect, 0f32, spr.data.get(x, y).unwrap().clone())
         }
     }
 }

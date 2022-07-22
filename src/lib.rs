@@ -4,9 +4,14 @@ mod app;
 mod consolebuiltins;
 mod zvm;
 
+mod tab;
+mod viewport;
+
 mod codewindow;
 mod gamewindow;
+mod leftpanel;
 mod mapwindow;
+mod propertieswindow;
 mod spriteswindow;
 
 pub use app::FanzApp;

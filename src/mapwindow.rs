@@ -1,6 +1,8 @@
 use std::fmt::Debug;
 
-use crate::zvm::{self, ZEvent, ZVMState, STATE_PTR, ZVM};
+use crate::app::draw_sprite;
+use crate::viewport::Viewport;
+use crate::zvm::{self, ZEvent, ZVMState, ZVM};
 use crate::FanzApp;
 use array2d::Array2D;
 use egui::{
@@ -11,8 +13,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct MapWindow {
     pub enabled: bool,
-    pub zoom: f32,
-    pub offset: Pos2,
+
+    #[serde(skip)]
+    pub viewport: Viewport,
+
     #[serde(skip)]
     pub tool: Tool,
 }
@@ -32,17 +36,15 @@ impl Default for Tool {
 impl Default for MapWindow {
     fn default() -> Self {
         MapWindow {
+            viewport: Viewport::default(),
             enabled: false,
-            zoom: 1.0,
-            offset: pos2(0.0, 0.0),
             tool: Tool::Pencil,
         }
     }
 }
 impl MapWindow {
     pub fn ui<'a>(&mut self, app: &mut FanzApp<'a>, ui: &mut egui::Ui) {
-        let tilesize = 32.0 / self.zoom;
-        let pixelsize = tilesize / 8.0;
+        let tilesize = 32.0 / self.viewport.zoom;
         let map = &mut app.cart.map;
         ui.horizontal(|ui| {
             let mut columns = map.num_columns();
@@ -53,33 +55,29 @@ impl MapWindow {
             ui.label("columns: ");
             ui.add(egui::DragValue::new(&mut columns));
 
-            if columns < map.row_len() {
+            while columns < map.row_len() {
                 map.popcolumn();
-            } else if columns > map.row_len() {
+            }
+            while columns > map.row_len() {
                 map.addcolumn(None);
             }
 
-            if rows < map.column_len() {
+            while rows < map.column_len() {
                 map.poprow();
-            } else if rows > map.column_len() {
+            }
+            while rows > map.column_len() {
                 map.addrow(None);
             }
         });
-        let (resp, painter) = ui.allocate_painter(
+        let (resp, painter, start) = self.viewport.draw(
+            ui,
             vec2(ui.available_width(), ui.available_height()),
-            Sense::click_and_drag(),
+            vec2(
+                map.num_rows() as f32 * tilesize,
+                map.num_columns() as f32 * tilesize,
+            ),
         );
 
-        let start = painter.clip_rect().min + (self.offset.to_vec2() / tilesize);
-
-        for e in &ui.input().events {
-            match e {
-                egui::Event::Scroll(s) => {
-                    self.zoom -= s.y / 128.0;
-                }
-                _ => (),
-            }
-        }
         for x in 0..map.num_rows() {
             for y in 0..map.num_columns() {
                 let tilerect = Rect::from_min_size(
@@ -88,28 +86,21 @@ impl MapWindow {
                 );
 
                 match map.get(x, y).unwrap() {
-                    Some(s) => {
-                        for sx in 0..8 {
-                            for sy in 0..8 {
-                                let fillrect = Rect::from_min_size(
-                                    tilerect.min
-                                        + vec2(sx as f32 * pixelsize, sy as f32 * pixelsize),
-                                    vec2(pixelsize, pixelsize),
-                                );
-                                ui.painter().rect_filled(
-                                    fillrect,
-                                    0f32,
-                                    app.cart.sprites[*s].data.get(sx, sy).unwrap().clone(),
-                                )
-                            }
-                        }
-                    }
+                    Some(s) => draw_sprite(&painter, tilerect, &app.cart.sprites[*s]),
                     None => (),
                 }
                 painter.rect_stroke(tilerect, 0f32, Stroke::new(2f32, Color32::WHITE));
 
                 match &resp.hover_pos() {
                     Some(s) => {
+                        for e in &ui.input().events {
+                            match e {
+                                egui::Event::Scroll(s) => {
+                                    self.viewport.zoom -= s.y / 128.0;
+                                }
+                                _ => (),
+                            }
+                        }
                         if tilerect.contains(*s) {
                             match self.tool {
                                 Tool::Pencil | Tool::Rect => {
@@ -132,7 +123,8 @@ impl MapWindow {
                             match self.tool {
                                 Tool::Pencil => {
                                     if ui.input().key_down(Key::Space) && resp.dragged() {
-                                        self.offset += resp.drag_delta() * tilesize;
+                                        self.viewport.offset -=
+                                            resp.drag_delta() * self.viewport.zoom;
                                     } else if resp.clicked_by(egui::PointerButton::Secondary)
                                         || resp.dragged_by(egui::PointerButton::Secondary)
                                     {
@@ -165,7 +157,8 @@ impl MapWindow {
                                 }
                                 Tool::Move => {
                                     if resp.dragged() {
-                                        self.offset += resp.drag_delta() * tilesize;
+                                        self.viewport.offset -=
+                                            resp.drag_delta() * self.viewport.zoom;
                                     }
                                 }
                                 Tool::Rect => todo!(),
@@ -176,27 +169,17 @@ impl MapWindow {
                 }
             }
         }
-        // self.zoom = self.zoom.min(0.5);
-        // dbg!(map.num_rows() as f32 * tilesize);
-        // dbg!(self.offset);
-        // self.offset = self.offset.clamp(
-        //     pos2(
-        //         map.num_rows() as f32 * tilesize * -tilesize,
-        //         map.num_columns() as f32 * tilesize * -tilesize,
-        //     ),
-        //     pos2(0.0, 0.0),
-        // );
     }
 }
-fn drawsprite() {}
 
-trait Resize<T> {
+pub trait Resize<T> {
     fn addrow(&mut self, default: T);
     fn addcolumn(&mut self, default: T);
 
     fn poprow(&mut self) -> Vec<T>;
     fn popcolumn(&mut self) -> Vec<T>;
 }
+
 impl<T> Resize<T> for Array2D<T>
 where
     T: Clone + Debug,
@@ -204,9 +187,6 @@ where
     fn addrow(&mut self, default: T) {
         let mut tvec = self.as_rows();
         tvec.push(vec![default; self.row_len()]);
-        for i in &tvec {
-            dbg!(i.len());
-        }
         *self = Array2D::from_rows(tvec.as_slice());
     }
     fn addcolumn(&mut self, default: T) {

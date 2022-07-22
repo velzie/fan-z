@@ -1,5 +1,7 @@
 use crate::app::toolbtn_ui;
-use crate::zvm::{self, ZEvent, ZVMState, STATE_PTR, ZVM};
+use crate::mapwindow::Resize;
+use crate::viewport::Viewport;
+use crate::zvm::{self, ZEvent, ZVMState, ZVM};
 use crate::FanzApp;
 // use crate::app::
 use array2d::Array2D;
@@ -12,6 +14,9 @@ use serde::{Deserialize, Serialize};
 pub struct SpritesWindow {
     pub enabled: bool,
 
+    #[serde(skip)]
+    viewport: Viewport,
+
     selectedcolor: Color32,
     #[serde(skip)]
     selectedtool: Tool,
@@ -23,6 +28,7 @@ pub enum Tool {
     Picker,
     Rect,
     Line,
+    Move,
 }
 impl Default for Tool {
     fn default() -> Self {
@@ -35,13 +41,50 @@ impl Default for SpritesWindow {
             enabled: false,
             selectedcolor: Color32::TRANSPARENT,
             selectedtool: Tool::Pencil,
+            viewport: Viewport::default(),
         }
     }
 }
 impl SpritesWindow {
     pub fn ui<'a>(&mut self, app: &mut FanzApp<'a>, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.add_space(50.0);
+            ui.label("color: ");
+            ui.color_edit_button_srgba(&mut self.selectedcolor);
+            if ui.small_button("+").clicked() {
+                app.cart.sprites.push(Sprite::new())
+            }
+            match app.cart.sprites.get_mut(app.selectedsprite) {
+                Some(sprite) => {
+                    let mut columns = sprite.data.num_columns();
+                    let mut rows = sprite.data.num_rows();
+
+                    ui.label("rows: ");
+                    ui.add(egui::DragValue::new(&mut rows));
+                    ui.label("columns: ");
+                    ui.add(egui::DragValue::new(&mut columns));
+
+                    while columns < sprite.data.row_len() {
+                        sprite.data.popcolumn();
+                    }
+                    while columns > sprite.data.row_len() {
+                        sprite.data.addcolumn(Color32::TRANSPARENT);
+                    }
+
+                    while rows < sprite.data.column_len() {
+                        sprite.data.poprow();
+                    }
+                    while rows > sprite.data.column_len() {
+                        sprite.data.addrow(Color32::TRANSPARENT);
+                    }
+                }
+                None => (),
+            };
+        });
         match app.cart.sprites.get_mut(app.selectedsprite) {
             Some(sprite) => {
+                let pixelsize = 32.0 / self.viewport.zoom;
+                let height = ui.available_height();
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         for variant in [
@@ -50,6 +93,7 @@ impl SpritesWindow {
                             Tool::Picker,
                             Tool::Rect,
                             Tool::Line,
+                            Tool::Move,
                         ] {
                             if sized_toolbtn_ui(
                                 ui,
@@ -63,16 +107,20 @@ impl SpritesWindow {
                             }
                         }
                     });
-                    let (resp, painter) =
-                        ui.allocate_painter(vec2(8.0 * 32.0, 8.0 * 32.0), Sense::click_and_drag());
-
-                    let start = painter.clip_rect().min;
-                    for x in 0..8 {
-                        for y in 0..8 {
+                    let (resp, painter, start) = self.viewport.draw(
+                        ui,
+                        vec2(ui.available_width(), height),
+                        vec2(
+                            sprite.data.num_rows() as f32 * pixelsize,
+                            sprite.data.num_columns() as f32 * pixelsize,
+                        ),
+                    );
+                    for x in 0..sprite.data.num_rows() {
+                        for y in 0..sprite.data.num_columns() {
                             let spritefill = sprite.data.get_mut(x, y).unwrap();
                             let squarerect = Rect::from_min_size(
-                                start + vec2(x as f32 * 32.0, y as f32 * 32.0),
-                                vec2(32.0, 32.0),
+                                start + vec2(x as f32 * pixelsize, y as f32 * pixelsize),
+                                vec2(pixelsize, pixelsize),
                             );
                             for x2 in 0..4 {
                                 for y2 in 0..4 {
@@ -80,10 +128,12 @@ impl SpritesWindow {
                                         Rect::from_min_size(
                                             start
                                                 + vec2(
-                                                    x as f32 * 32.0 + x2 as f32 * 8.0,
-                                                    y as f32 * 32.0 + y2 as f32 * 8.0,
+                                                    x as f32 * pixelsize
+                                                        + x2 as f32 * pixelsize / 4.0,
+                                                    y as f32 * pixelsize
+                                                        + y2 as f32 * pixelsize / 4.0,
                                                 ),
-                                            vec2(8.0, 8.0),
+                                            vec2(pixelsize / 4.0, pixelsize / 4.0),
                                         ),
                                         0f32,
                                         if (x2 + y2) % 2 != 0 {
@@ -104,6 +154,14 @@ impl SpritesWindow {
 
                             match &resp.hover_pos() {
                                 Some(s) => {
+                                    for e in &ui.input().events {
+                                        match e {
+                                            egui::Event::Scroll(s) => {
+                                                self.viewport.zoom -= s.y / 100000.0;
+                                            }
+                                            _ => (),
+                                        }
+                                    }
                                     if squarerect.contains(*s) {
                                         match self.selectedtool {
                                             Tool::Pencil | Tool::Rect | Tool::Line => {
@@ -113,6 +171,7 @@ impl SpritesWindow {
                                                     self.selectedcolor,
                                                 );
                                             }
+                                            Tool::Move => {}
                                             Tool::Eraser => {
                                                 painter.rect_filled(
                                                     squarerect.clone(),
@@ -133,7 +192,14 @@ impl SpritesWindow {
 
                                         match self.selectedtool {
                                             Tool::Pencil => {
-                                                if resp.clicked_by(egui::PointerButton::Secondary)
+                                                if ui.input().key_down(Key::Space) && resp.dragged()
+                                                {
+                                                    resp.clone()
+                                                        .on_hover_cursor(egui::CursorIcon::Grab);
+                                                    self.viewport.offset -=
+                                                        resp.drag_delta() * self.viewport.zoom;
+                                                } else if resp
+                                                    .clicked_by(egui::PointerButton::Secondary)
                                                     || resp
                                                         .dragged_by(egui::PointerButton::Secondary)
                                                 {
@@ -158,6 +224,14 @@ impl SpritesWindow {
                                                     self.selectedtool = Tool::Pencil;
                                                 }
                                             }
+                                            Tool::Move => {
+                                                resp.clone()
+                                                    .on_hover_cursor(egui::CursorIcon::Grab);
+                                                if resp.dragged() {
+                                                    self.viewport.offset -=
+                                                        resp.drag_delta() * self.viewport.zoom;
+                                                }
+                                            }
                                             Tool::Rect | Tool::Line => todo!(),
                                         }
                                     }
@@ -170,13 +244,6 @@ impl SpritesWindow {
             }
             None => (),
         }
-        ui.horizontal(|ui| {
-            ui.label("color: ");
-            ui.color_edit_button_srgba(&mut self.selectedcolor);
-            if ui.small_button("+").clicked() {
-                app.cart.sprites.push(Sprite::new())
-            }
-        });
     }
 }
 

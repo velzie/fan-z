@@ -547,6 +547,7 @@ dependencies = [
  "egui-winit",
  "egui_glow",
  "glutin",
+ "lazy_static",
  "serde",
  "tracing-subscriber",
  "tracing-wasm",

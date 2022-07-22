@@ -16,14 +16,16 @@ impl Default for CodeWindow {
 impl CodeWindow {
     pub fn ui<'a>(&mut self, app: &mut FanzApp<'a>, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.add(
-                egui::TextEdit::multiline(&mut app.cart.code)
-                    .font(egui::TextStyle::Monospace) // for cursor height
-                    .code_editor()
-                    .desired_rows(40)
-                    .lock_focus(true)
-                    .desired_width(f32::INFINITY),
-            );
+            if let Some(obj) = app.cart.objects.get_mut(app.selectedobject) {
+                ui.add(
+                    egui::TextEdit::multiline(&mut obj.script)
+                        .font(egui::TextStyle::Monospace) // for cursor height
+                        .code_editor()
+                        .desired_rows(40)
+                        .lock_focus(true)
+                        .desired_width(f32::INFINITY),
+                );
+            }
         });
     }
 }

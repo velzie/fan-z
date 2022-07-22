@@ -1,3 +1,4 @@
+use crate::app::Cart;
 use crate::spriteswindow::Sprite;
 // use c
 use crate::zvm::{self, ZEvent, ZVMState, STATE_PTR, ZVM};
@@ -7,15 +8,24 @@ use egui::{
     pos2, Align2, Color32, Id, Key, LayerId, Painter, Pos2, Rect, RichText, Sense, Stroke, Vec2,
     Widget,
 };
+use zsp_core::exceptions::Exception;
 pub struct GameWindow<'a> {
     pub enabled: bool,
-    pub vm: Option<ZVM<'a>>,
+    pub game: Option<Game<'a>>, // pub vm: Option<ZVM<'a>>,
 }
+
+pub struct Game<'a> {
+    pub objects: Vec<GameObject<'a>>,
+}
+pub struct GameObject<'a> {
+    pub vm: ZVM<'a>,
+}
+
 impl<'a> Default for GameWindow<'a> {
     fn default() -> Self {
         GameWindow {
             enabled: false,
-            vm: None,
+            game: None,
         }
     }
 }
@@ -29,16 +39,19 @@ impl<'a> GameWindow<'a> {
             Sense::click_and_drag(),
         );
 
-        match &mut self.vm {
-            Some(vm) => {
+        match &mut self.game {
+            Some(game) => {
                 let mut state = unsafe { &mut *STATE_PTR };
-                match vm.draw() {
-                    Err(e) => {
-                        let o = zvm::errfmt(e, &app.cart.code);
-                        app.output
-                            .push(RichText::new(o.to_string()).color(Color32::RED));
+
+                for obj in &mut game.objects {
+                    match obj.vm.draw() {
+                        Err(e) => {
+                            let o = obj.vm.fmt(e);
+                            app.output
+                                .push(RichText::new(o.to_string()).color(Color32::RED));
+                        }
+                        _ => (),
                     }
-                    _ => (),
                 }
 
                 let start = painter.clip_rect().min;
@@ -97,6 +110,21 @@ impl<'a> GameWindow<'a> {
             }
             None => (),
         }
+    }
+    pub fn startgame(cart: &mut Cart) -> Result<Game<'a>, String> {
+        let mut objects = vec![];
+
+        for editorobj in &cart.objects {
+            let vm = match ZVM::start(editorobj.script.clone()) {
+                Ok(vm) => vm,
+                Err(e) => {
+                    let o = zvm::errfmt(e, &editorobj.script);
+                    return Err(o);
+                }
+            };
+            objects.push(GameObject { vm: vm })
+        }
+        Ok(Game { objects })
     }
 }
 

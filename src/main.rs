@@ -10,6 +10,7 @@ fn main() {
     tracing_subscriber::fmt::init();
 
     let native_options = eframe::NativeOptions::default();
+    // native_options.
     eframe::run_native(
         "eframe template",
         native_options,
