@@ -72,7 +72,7 @@ impl<'a> Default for FanzApp<'a> {
             gamewindow: Rc::new(RefCell::new(GameWindow::default())),
             codewindow: Rc::new(RefCell::new(CodeWindow::default())),
             mapwindow: Rc::new(RefCell::new(MapWindow::default())),
-            propertieswindow: None,
+            propertieswindow: Rc::new(RefCell::new(PropertiesWindow::default())),
             spriteswindow: Rc::new(RefCell::new(SpritesWindow::default())),
             leftpanel: Rc::new(RefCell::new(vec![
                 Box::new(SpritesSelector),

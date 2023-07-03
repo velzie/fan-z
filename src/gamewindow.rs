@@ -9,6 +9,8 @@ use egui::{
     Widget,
 };
 use zsp_core::exceptions::Exception;
+
+const WIDTH: u32 = 160;
 pub struct GameWindow<'a> {
     pub enabled: bool,
     pub game: Option<Game<'a>>, // pub vm: Option<ZVM<'a>>,

@@ -51,7 +51,7 @@ impl<'a> ZVM<'a> {
             let tokens = lexer::lex(contents.clone());
             let libraryfunctions = consolebuiltins::functions();
 
-            let root = parser::parse(tokens, &contents, &libraryfunctions)?;
+            let root = parser::parse(tokens, &contents, &libraryfunctions, &vec![])?;
             let mut functions = builtins::functions();
 
             for (k, v) in libraryfunctions {
